@@ -10,30 +10,45 @@ type DB struct {
 	Dir string
 }
 
-func (db *DB) User(id string) (*User, error) {
-	path := filepath.Join(db.Dir, "users", id)
+func read[T any](dir, t, id string) (*T, error) {
+	path := filepath.Join(dir, t, id)
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	u := User{}
-	err = json.NewDecoder(f).Decode(&u)
+	var v T
+	err = json.NewDecoder(f).Decode(&v)
 	if err != nil {
 		panic(err)
 	}
-	return &u, nil
+	return &v, nil
+}
+
+func save[T any](dir, t, id string, v *T) error {
+	path := filepath.Join(dir, t, id)
+	err := os.MkdirAll(filepath.Dir(path), os.ModePerm)
+	if err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		panic(err)
+	}
+	return os.WriteFile(path, b, os.ModePerm)
+}
+
+func (db *DB) User(id string) (*User, error) {
+	return read[User](db.Dir, "users", id)
+}
+
+func (db *DB) SaveUser(u *User) error {
+	return save(db.Dir, "users", u.ID, u)
 }
 
 func (db *DB) Phone(number string) (*Phone, error) {
-	path := filepath.Join(db.Dir, "phones", number)
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	p := Phone{}
-	err = json.NewDecoder(f).Decode(&p)
-	if err != nil {
-		panic(err)
-	}
-	return &p, nil
+	return read[Phone](db.Dir, "phones", number)
+}
+
+func (db *DB) SavePhone(p *Phone) error {
+	return save(db.Dir, "phones", p.Number, p)
 }
