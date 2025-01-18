@@ -2,11 +2,17 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"os"
+
+	"github.com/mikerybka/twilio"
 )
 
 type Server struct {
-	DB *DB
+	DB           *DB
+	TwilioClient *twilio.Client
 }
 
 type SendLoginCodeRequest struct {
@@ -19,7 +25,49 @@ type SendLoginCodeResponse struct {
 }
 
 func (s *Server) SendLoginCode(req *SendLoginCodeRequest) SendLoginCodeResponse {
-	return SendLoginCodeResponse{}
+	phone, err := s.DB.Phone(req.Phone)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			userID := newUserID()
+
+			user := &User{
+				ID: userID,
+			}
+			err := s.DB.SaveUser(user)
+			if err != nil {
+				panic(err)
+			}
+
+			phone = &Phone{
+				Number:     req.Phone,
+				UserIDs:    []string{userID},
+				LoginCodes: map[string]bool{},
+			}
+			err = s.DB.SavePhone(phone)
+			if err != nil {
+				panic(err)
+			}
+		} else {
+			panic(err)
+		}
+	}
+
+	loginCode := newLoginCode()
+	phone.LoginCodes[loginCode] = true
+	err = s.DB.SavePhone(phone)
+	if err != nil {
+		panic(err)
+	}
+
+	msg := fmt.Sprintf("Your login code is %s", loginCode)
+	err = s.TwilioClient.SendSMS(phone.Number, msg)
+	if err != nil {
+		panic(err)
+	}
+
+	return SendLoginCodeResponse{
+		UserIDs: phone.UserIDs,
+	}
 }
 
 type LoginRequest struct {
