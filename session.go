@@ -1,6 +1,6 @@
 package auth
 
 type Session struct {
-	Token  string `json:"token"`
-	UserID string `json:"user_id"`
+	Token string `json:"token"`
+	Phone string `json:"phone"`
 }

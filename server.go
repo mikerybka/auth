@@ -20,8 +20,7 @@ type SendLoginCodeRequest struct {
 }
 
 type SendLoginCodeResponse struct {
-	UserIDs []string `json:"user_ids"`
-	Error   error    `json:"error"`
+	Error error `json:"error"`
 }
 
 func (s *Server) SendLoginCode(req *SendLoginCodeRequest) SendLoginCodeResponse {
@@ -65,9 +64,7 @@ func (s *Server) SendLoginCode(req *SendLoginCodeRequest) SendLoginCodeResponse 
 		panic(err)
 	}
 
-	return SendLoginCodeResponse{
-		UserIDs: phone.UserIDs,
-	}
+	return SendLoginCodeResponse{}
 }
 
 type LoginRequest struct {
@@ -76,12 +73,44 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	Token string `json:"token"`
-	Error error  `json:"error"`
+	Token   string   `json:"token"`
+	UserIDs []string `json:"user_ids"`
+	Error   error    `json:"error"`
 }
 
 func (s *Server) Login(req *LoginRequest) LoginResponse {
-	return LoginResponse{}
+	phone, err := s.DB.Phone(req.Phone)
+	if err != nil {
+		return LoginResponse{
+			Error: err,
+		}
+	}
+
+	if !phone.LoginCodes[req.Code] {
+		return LoginResponse{
+			Error: fmt.Errorf("bad code"),
+		}
+	}
+
+	phone.LoginCodes[req.Code] = false
+	err = s.DB.SavePhone(phone)
+	if err != nil {
+		panic(err)
+	}
+
+	session := &Session{
+		Token: newSessionToken(),
+		Phone: phone.Number,
+	}
+	err = s.DB.SaveSession(session)
+	if err != nil {
+		panic(err)
+	}
+
+	return LoginResponse{
+		Token:   session.Token,
+		UserIDs: phone.UserIDs,
+	}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -104,4 +133,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	mux.ServeHTTP(w, r)
 }
 
-func (s *Server) GetUserID(r *http.Request) string
+// GetUserID returns the ID of the requesting user
+func (s *Server) GetUserID(r *http.Request) string {
+	token := r.Header.Get("Token")
+	session, err := s.DB.Session(token)
+	if err != nil {
+		return ""
+	}
+	phone, err := s.DB.Phone(session.Phone)
+	if err != nil {
+		return ""
+	}
+	userID := r.Header.Get("User")
+	for _, id := range phone.UserIDs {
+		if id == userID {
+			return id
+		}
+	}
+	return ""
+}
