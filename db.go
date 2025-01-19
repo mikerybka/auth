@@ -52,3 +52,11 @@ func (db *DB) Phone(number string) (*Phone, error) {
 func (db *DB) SavePhone(p *Phone) error {
 	return save(db.Dir, "phones", p.Number, p)
 }
+
+func (db *DB) Session(token string) (*Session, error) {
+	return read[Session](db.Dir, "sessions", token)
+}
+
+func (db *DB) SaveSession(s *Session) error {
+	return save(db.Dir, "sessions", s.Token, s)
+}
