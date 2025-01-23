@@ -60,3 +60,11 @@ func (db *DB) Session(token string) (*Session, error) {
 func (db *DB) SaveSession(s *Session) error {
 	return save(db.Dir, "sessions", s.Token, s)
 }
+
+func (db *DB) Team(id string) (*Team, error) {
+	return read[Team](db.Dir, "teams", id)
+}
+
+func (db *DB) SaveTeam(t *Team) error {
+	return save(db.Dir, "teams", t.ID, t)
+}
