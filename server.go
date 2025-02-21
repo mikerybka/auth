@@ -74,7 +74,7 @@ type LoginRequest struct {
 
 type LoginResponse struct {
 	Token   string   `json:"token"`
-	UserIDs []string `json:"user_ids"`
+	UserIDs []string `json:"userIDs"`
 	Error   error    `json:"error"`
 }
 
