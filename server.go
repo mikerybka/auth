@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/mikerybka/twilio"
+	"github.com/mikerybka/util"
 )
 
 type Server struct {
@@ -23,23 +24,33 @@ type SendLoginCodeResponse struct {
 	Error error `json:"error"`
 }
 
-func (s *Server) SendLoginCode(req *SendLoginCodeRequest) SendLoginCodeResponse {
+func (s *Server) SendLoginCode(w http.ResponseWriter, r *http.Request) {
+	// Decode input
+	req := &SendLoginCodeRequest{}
+	err := json.NewDecoder(r.Body).Decode(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.Phone = util.NormalizePhoneNumber(req.Phone)
+
+	// Check the DB for the existing phone number
 	phone, err := s.DB.Phone(req.Phone)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			userID := newUserID()
-
+			// If not, create a user for that phone number.
 			user := &User{
-				ID: userID,
+				ID: newUserID(),
 			}
 			err := s.DB.SaveUser(user)
 			if err != nil {
 				panic(err)
 			}
 
+			// And assign the new user to that phone.
 			phone = &Phone{
 				Number:     req.Phone,
-				UserIDs:    []string{userID},
+				UserIDs:    []string{user.ID},
 				LoginCodes: map[string]bool{},
 			}
 			err = s.DB.SavePhone(phone)
@@ -51,6 +62,7 @@ func (s *Server) SendLoginCode(req *SendLoginCodeRequest) SendLoginCodeResponse 
 		}
 	}
 
+	// Create a new login code in the system
 	loginCode := newLoginCode()
 	phone.LoginCodes[loginCode] = true
 	err = s.DB.SavePhone(phone)
@@ -58,13 +70,16 @@ func (s *Server) SendLoginCode(req *SendLoginCodeRequest) SendLoginCodeResponse 
 		panic(err)
 	}
 
+	// Send login code to phone
 	msg := fmt.Sprintf("Your login code is %s", loginCode)
 	err = s.TwilioClient.SendSMS(phone.Number, msg)
 	if err != nil {
 		panic(err)
 	}
 
-	return SendLoginCodeResponse{}
+	// Respond with a nil error.
+	res := SendLoginCodeResponse{}
+	json.NewEncoder(w).Encode(res)
 }
 
 type LoginRequest struct {
@@ -78,26 +93,36 @@ type LoginResponse struct {
 	Error   error    `json:"error"`
 }
 
-func (s *Server) Login(req *LoginRequest) LoginResponse {
+func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
+	req := &LoginRequest{}
+	err := json.NewDecoder(r.Body).Decode(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.Phone = util.NormalizePhoneNumber(req.Phone)
+
+	// Read
 	phone, err := s.DB.Phone(req.Phone)
 	if err != nil {
-		return LoginResponse{
-			Error: err,
-		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
+	// Check validity of the login code.
 	if !phone.LoginCodes[req.Code] {
-		return LoginResponse{
-			Error: fmt.Errorf("bad code"),
-		}
+		http.Error(w, "wrong code", http.StatusBadRequest)
+		return
 	}
 
+	// Remove the login code from the DB since it's now been used.
 	phone.LoginCodes[req.Code] = false
 	err = s.DB.SavePhone(phone)
 	if err != nil {
 		panic(err)
 	}
 
+	// Create a new session in the DB.
 	session := &Session{
 		Token: newSessionToken(),
 		Phone: phone.Number,
@@ -107,29 +132,18 @@ func (s *Server) Login(req *LoginRequest) LoginResponse {
 		panic(err)
 	}
 
-	return LoginResponse{
+	// Respond with Session data.
+	res := LoginResponse{
 		Token:   session.Token,
 		UserIDs: phone.UserIDs,
 	}
+	json.NewEncoder(w).Encode(res)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	mux := http.NewServeMux()
-
-	mux.HandleFunc("/send-login-code", func(w http.ResponseWriter, r *http.Request) {
-		req := &SendLoginCodeRequest{}
-		json.NewDecoder(r.Body).Decode(req)
-		res := s.SendLoginCode(req)
-		json.NewEncoder(w).Encode(res)
-	})
-
-	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		req := &LoginRequest{}
-		json.NewDecoder(r.Body).Decode(req)
-		res := s.Login(req)
-		json.NewEncoder(w).Encode(res)
-	})
-
+	mux.HandleFunc("/send-login-code", s.SendLoginCode)
+	mux.HandleFunc("/login", s.Login)
 	mux.ServeHTTP(w, r)
 }
 
